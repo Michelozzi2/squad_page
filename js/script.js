@@ -390,42 +390,131 @@ const students = [
 ];
 
 // ============================================
-// FONCTIONS DE RENDU
+// STATE MANAGEMENT
+// ============================================
+
+let currentFilter = 'all';
+let currentSearch = '';
+let currentView = 'grid';
+let filteredStudents = [...students];
+
+// ============================================
+// THEME MANAGEMENT
 // ============================================
 
 /**
- * Initialise la page en affichant tous les étudiants
+ * Initialise le thème basé sur les préférences utilisateur ou le localStorage
  */
-function renderSquad() {
-    const aiGrid = document.getElementById('aiSpecialists');
-    const fullstackGrid = document.getElementById('fullstackDevs');
-    const securityGrid = document.getElementById('securityExperts');
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    
+    if (savedTheme) {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+    } else if (!prefersDark) {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+}
 
-    students.forEach(student => {
-        const card = createStudentCard(student);
+/**
+ * Bascule entre le thème clair et sombre
+ */
+function toggleTheme() {
+    const html = document.documentElement;
+    const currentTheme = html.getAttribute('data-theme');
+    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+    
+    html.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    // Animation de transition
+    document.body.style.transition = 'background-color 0.3s ease, color 0.3s ease';
+    
+    showToast(`Thème ${newTheme === 'dark' ? 'sombre' : 'clair'} activé`, 'success');
+}
+
+// ============================================
+// RENDER FUNCTIONS
+// ============================================
+
+/**
+ * Met à jour les compteurs de catégories
+ */
+function updateCounts() {
+    const allCount = students.length;
+    const aiCount = students.filter(s => s.category === 'ai').length;
+    const fullstackCount = students.filter(s => s.category === 'fullstack').length;
+    
+    document.getElementById('countAll').textContent = allCount;
+    document.getElementById('countAi').textContent = aiCount;
+    document.getElementById('countFullstack').textContent = fullstackCount;
+}
+
+/**
+ * Filtre les étudiants selon la recherche et la catégorie
+ */
+function filterStudents() {
+    filteredStudents = students.filter(student => {
+        // Filtre par catégorie
+        const categoryMatch = currentFilter === 'all' || student.category === currentFilter;
         
-        if (student.category === 'ai') {
-            aiGrid.appendChild(card);
-        } else if (student.category === 'fullstack') {
-            fullstackGrid.appendChild(card);
-        } else if (student.category === 'security') {
-            securityGrid.appendChild(card);
-        }
+        // Filtre par recherche
+        const searchLower = currentSearch.toLowerCase();
+        const searchMatch = currentSearch === '' || 
+            student.name.toLowerCase().includes(searchLower) ||
+            student.role.toLowerCase().includes(searchLower) ||
+            student.strengths.some(s => s.toLowerCase().includes(searchLower)) ||
+            student.birthplace.toLowerCase().includes(searchLower);
+        
+        return categoryMatch && searchMatch;
     });
+    
+    renderStudents();
+}
+
+/**
+ * Affiche les étudiants filtrés dans la grille
+ */
+function renderStudents() {
+    const grid = document.getElementById('studentsGrid');
+    const noResults = document.getElementById('noResults');
+    
+    grid.innerHTML = '';
+    
+    if (filteredStudents.length === 0) {
+        noResults.style.display = 'block';
+        grid.style.display = 'none';
+        return;
+    }
+    
+    noResults.style.display = 'none';
+    grid.style.display = 'grid';
+    
+    // Appliquer la vue actuelle
+    grid.classList.toggle('list-view', currentView === 'list');
+    
+    filteredStudents.forEach((student, index) => {
+        const card = createStudentCard(student, index);
+        grid.appendChild(card);
+    });
+    
+    // Réinitialiser les animations
+    setupScrollAnimations();
 }
 
 /**
  * Crée une carte d'étudiant pour la grille principale
  * @param {Object} student - Les données de l'étudiant
+ * @param {number} index - L'index pour l'animation décalée
  * @returns {HTMLElement} - L'élément de carte créé
  */
-function createStudentCard(student) {
+function createStudentCard(student, index) {
     const card = document.createElement('div');
     card.className = 'player-card';
+    card.style.animationDelay = `${0.1 + (index * 0.05)}s`;
     card.onclick = () => openProfile(student);
-    card.tabIndex = 0; // Rendre la carte accessible au clavier
+    card.tabIndex = 0;
     
-    // Navigation au clavier
     card.onkeypress = (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -433,13 +522,17 @@ function createStudentCard(student) {
         }
     };
     
-    // Si l'étudiant a une image, utiliser l'image, sinon utiliser l'emoji
     const photoContent = student.image 
-        ? `<img src="${student.image}" alt="${student.name}" loading="lazy">`
+        ? `<img src="${student.image}" alt="${student.name}" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='${student.emoji}'">`
         : student.emoji;
     
+    const categoryLabel = student.category === 'ai' ? 'AI & Data' : 'Full Stack';
+    
     card.innerHTML = `
-        <div class="player-photo">${photoContent}</div>
+        <div class="player-photo">
+            ${photoContent}
+            <span class="player-category-badge">${categoryLabel}</span>
+        </div>
         <div class="player-info">
             <div class="player-name">${student.name}</div>
             <div class="player-role">${student.role}</div>
@@ -450,19 +543,17 @@ function createStudentCard(student) {
 }
 
 /**
- * Ouvre le profil détaillé d'un étudiant avec animation
+ * Ouvre le profil détaillé d'un étudiant
  * @param {Object} student - Les données de l'étudiant
  */
 function openProfile(student) {
     const modal = document.getElementById('profileModal');
     const content = document.getElementById('profileContent');
     
-    // Si l'étudiant a une image, utiliser l'image, sinon utiliser l'emoji
     const photoContent = student.image 
-        ? `<img src="${student.image}" alt="${student.name}" loading="lazy">`
+        ? `<img src="${student.image}" alt="${student.name}" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='${student.emoji}'">`
         : student.emoji;
     
-    // Afficher la description détaillée si elle existe, sinon utiliser achievement
     const descriptionContent = student.detailedDescription 
         ? `<div class="detail-value">${student.detailedDescription}</div>`
         : `<div class="detail-value">${student.achievement}</div>`;
@@ -475,82 +566,84 @@ function openProfile(student) {
             
             <div class="stats-grid">
                 <div class="stat-item">
-                    <span class="stat-value">${student.projects}</span>
-                    <span class="stat-label">Projets réalisés</span>
+                    <span class="stat-value" data-target="${student.projects}">0</span>
+                    <span class="stat-label">Projets</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value">${student.commits}</span>
-                    <span class="stat-label">Commits Git</span>
+                    <span class="stat-value" data-target="${student.commits}">0</span>
+                    <span class="stat-label">Commits</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value">${student.skills}</span>
-                    <span class="stat-label">Compétences</span>
+                    <span class="stat-value" data-target="${student.skills}">0</span>
+                    <span class="stat-label">Skills</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value">${student.hours}</span>
-                    <span class="stat-label">Heures de code</span>
+                    <span class="stat-value" data-target="${student.hours}">0</span>
+                    <span class="stat-label">Heures</span>
                 </div>
             </div>
 
             <div class="detail-section">
-                <div class="detail-label">Name</div>
+                <div class="detail-label">Nom complet</div>
                 <div class="detail-value">${student.name}</div>
             </div>
 
             <div class="detail-section">
-                <div class="detail-label">Age / Date of Birth</div>
-                <div class="detail-value">${student.age} years old (${student.birthdate})</div>
+                <div class="detail-label">Âge / Date de naissance</div>
+                <div class="detail-value">${student.age} ans (${student.birthdate})</div>
             </div>
 
             <div class="detail-section">
-                <div class="detail-label">Place of Birth / Nationality</div>
+                <div class="detail-label">Lieu de naissance / Nationalité</div>
                 <div class="detail-value">${student.birthplace} <span class="flag">${student.nationality}</span></div>
             </div>
 
             <div class="detail-section">
-                <div class="detail-label">Coding Strengths</div>
+                <div class="detail-label">Compétences clés</div>
                 <div class="skills-list">
                     ${student.strengths.map(skill => `<span class="skill-tag">${skill}</span>`).join('')}
                 </div>
             </div>
 
             <div class="detail-section">
-                <div class="detail-label">Coding Weaknesses</div>
+                <div class="detail-label">Points à améliorer</div>
                 <div class="skills-list">
                     ${student.weaknesses.map(skill => `<span class="skill-tag">${skill}</span>`).join('')}
                 </div>
             </div>
 
             <div class="detail-section">
-                <div class="detail-label">Biggest Achievement in Coding</div>
+                <div class="detail-label">Plus grande réalisation</div>
                 ${descriptionContent}
             </div>
 
             <div class="detail-section">
-                <div class="detail-label">Interesting (Fun?) Fact</div>
+                <div class="detail-label">Fun fact</div>
                 <div class="detail-value">${student.funFact}</div>
             </div>
 
             ${student.futurePlans ? `
             <div class="detail-section">
-                <div class="detail-label">Future Plans</div>
+                <div class="detail-label">Projets futurs</div>
                 <div class="detail-value">${student.futurePlans}</div>
             </div>
             ` : ''}
 
-            <button class="watch-button">📁 View Portfolio</button>
+            <button class="watch-button" onclick="showToast('Portfolio bientôt disponible!', 'success')">
+                📁 Voir le portfolio
+            </button>
         </div>
     `;
     
     modal.classList.add('active');
     document.body.style.overflow = 'hidden';
     
-    // Ajouter l'animation des statistiques
-    animateStats();
+    // Animer les stats après un court délai
+    setTimeout(() => animateStats(), 300);
 }
 
 /**
- * Ferme le profil détaillé et retourne à la grille principale
+ * Ferme le profil modal
  */
 function closeProfile() {
     const modal = document.getElementById('profileModal');
@@ -558,16 +651,20 @@ function closeProfile() {
     document.body.style.overflow = 'auto';
 }
 
+// ============================================
+// ANIMATIONS
+// ============================================
+
 /**
- * Anime les valeurs statistiques avec un effet de compteur
+ * Anime les compteurs statistiques
  */
 function animateStats() {
-    const statValues = document.querySelectorAll('.stat-value');
+    const statValues = document.querySelectorAll('.stat-value[data-target]');
     
     statValues.forEach(stat => {
-        const target = parseInt(stat.textContent);
-        const duration = 1000; // 1 seconde
-        const steps = 30;
+        const target = parseInt(stat.getAttribute('data-target'));
+        const duration = 1500;
+        const steps = 60;
         const increment = target / steps;
         let current = 0;
         let step = 0;
@@ -575,22 +672,96 @@ function animateStats() {
         const timer = setInterval(() => {
             step++;
             current = Math.min(current + increment, target);
-            stat.textContent = Math.round(current);
+            stat.textContent = Math.round(current).toLocaleString();
             
             if (step >= steps) {
-                stat.textContent = target;
+                stat.textContent = target.toLocaleString();
                 clearInterval(timer);
             }
         }, duration / steps);
     });
 }
 
+/**
+ * Anime les compteurs de l'aperçu global
+ */
+function animateOverviewStats() {
+    const overviewValues = document.querySelectorAll('.overview-value[data-target]');
+    
+    overviewValues.forEach(stat => {
+        const target = parseInt(stat.getAttribute('data-target'));
+        const duration = 2000;
+        const steps = 80;
+        const increment = target / steps;
+        let current = 0;
+        let step = 0;
+        
+        const timer = setInterval(() => {
+            step++;
+            current = Math.min(current + increment, target);
+            stat.textContent = Math.round(current).toLocaleString();
+            
+            if (step >= steps) {
+                stat.textContent = target.toLocaleString();
+                clearInterval(timer);
+            }
+        }, duration / steps);
+    });
+}
+
+/**
+ * Configure les animations au scroll
+ */
+function setupScrollAnimations() {
+    const cards = document.querySelectorAll('.player-card');
+    
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0) scale(1)';
+            }
+        });
+    }, {
+        threshold: 0.1,
+        rootMargin: '0px 0px -50px 0px'
+    });
+    
+    cards.forEach(card => {
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(20px) scale(0.95)';
+        observer.observe(card);
+    });
+}
+
 // ============================================
-// EFFETS DE SCROLL ET INTERACTIONS
+// UTILITIES
 // ============================================
 
 /**
- * Ajoute une classe au header lors du scroll
+ * Affiche une notification toast
+ * @param {string} message - Le message à afficher
+ * @param {string} type - Le type de notification (success/error)
+ */
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `
+        <span>${type === 'success' ? '✓' : '✕'}</span>
+        <span>${message}</span>
+    `;
+    
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'toastOut 0.3s ease-out forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+/**
+ * Gère le scroll du header
  */
 function handleScroll() {
     const header = document.querySelector('header');
@@ -601,60 +772,82 @@ function handleScroll() {
     }
 }
 
-/**
- * Gère l'apparition des cartes lors du scroll (Intersection Observer)
- */
-function setupScrollAnimations() {
-    const cards = document.querySelectorAll('.player-card');
-    
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.style.opacity = '1';
-                entry.target.style.transform = 'translateY(0)';
-            }
-        });
-    }, {
-        threshold: 0.1,
-        rootMargin: '0px 0px -50px 0px'
-    });
-    
-    cards.forEach(card => {
-        observer.observe(card);
-    });
-}
+// ============================================
+// EVENT LISTENERS
+// ============================================
 
 /**
- * Gère la navigation par onglets
+ * Configure tous les event listeners
  */
-function setupTabs() {
-    const tabs = document.querySelectorAll('.tab');
+function setupEventListeners() {
+    // Theme toggle
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', toggleTheme);
+    }
     
-    tabs.forEach((tab, index) => {
-        tab.addEventListener('click', () => {
-            // Retirer la classe active de tous les onglets
-            tabs.forEach(t => t.classList.remove('active'));
-            // Ajouter la classe active à l'onglet cliqué
-            tab.classList.add('active');
+    // Search
+    const searchInput = document.getElementById('searchInput');
+    const searchClear = document.getElementById('searchClear');
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            currentSearch = e.target.value;
+            searchClear.classList.toggle('visible', currentSearch.length > 0);
+            filterStudents();
+        });
+    }
+    
+    if (searchClear) {
+        searchClear.addEventListener('click', () => {
+            searchInput.value = '';
+            currentSearch = '';
+            searchClear.classList.remove('visible');
+            filterStudents();
+        });
+    }
+    
+    // Reset search button
+    const resetSearch = document.getElementById('resetSearch');
+    if (resetSearch) {
+        resetSearch.addEventListener('click', () => {
+            searchInput.value = '';
+            currentSearch = '';
+            currentFilter = 'all';
+            searchClear.classList.remove('visible');
             
-            // Ici vous pouvez ajouter la logique de filtrage si nécessaire
-            // Par exemple, filtrer par catégorie
+            // Reset active filter tab
+            document.querySelectorAll('.filter-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.filter === 'all');
+            });
+            
+            filterStudents();
         });
-        
-        // Navigation au clavier pour les onglets
-        tab.tabIndex = 0;
-        tab.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                tab.click();
-            }
+    }
+    
+    // Filter tabs
+    const filterTabs = document.querySelectorAll('.filter-tab');
+    filterTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            filterTabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            currentFilter = tab.dataset.filter;
+            filterStudents();
         });
     });
-}
-
-/**
- * Ferme le modal avec la touche Escape
- */
-function setupKeyboardNavigation() {
+    
+    // View toggle
+    const viewBtns = document.querySelectorAll('.view-btn');
+    viewBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            viewBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentView = btn.dataset.view;
+            renderStudents();
+        });
+    });
+    
+    // Keyboard navigation
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             const modal = document.getElementById('profileModal');
@@ -663,60 +856,53 @@ function setupKeyboardNavigation() {
             }
         }
     });
-}
-
-/**
- * Ajoute un effet parallaxe subtil au survol des cartes
- */
-function setupCardParallax() {
-    const cards = document.querySelectorAll('.player-card');
     
-    cards.forEach(card => {
-        card.addEventListener('mousemove', (e) => {
-            const rect = card.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            const centerX = rect.width / 2;
-            const centerY = rect.height / 2;
-            
-            const rotateX = (y - centerY) / 20;
-            const rotateY = (centerX - x) / 20;
-            
-            card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-12px)`;
-        });
-        
-        card.addEventListener('mouseleave', () => {
-            card.style.transform = '';
-        });
-    });
-}
-
-// ============================================
-// INITIALISATION
-// ============================================
-
-// Attendre que le DOM soit chargé avant d'initialiser
-document.addEventListener('DOMContentLoaded', function() {
-    // Rendu initial
-    renderSquad();
-    
-    // Configuration des interactions
-    setupTabs();
-    setupKeyboardNavigation();
-    setupScrollAnimations();
-    
-    // Effet parallaxe sur les cartes (désactivé sur mobile pour de meilleures performances)
-    if (window.innerWidth > 768) {
-        setTimeout(() => {
-            setupCardParallax();
-        }, 500);
-    }
-    
-    // Écouter le scroll
+    // Scroll handler
     window.addEventListener('scroll', handleScroll);
     
-    // Message de bienvenue dans la console
-    console.log('%c🎓 Master 2 Informatique - Promotion 2025', 'font-size: 20px; font-weight: bold; color: #667eea;');
-    console.log(`%c${students.length} étudiants brillants dans cette promotion!`, 'font-size: 14px; color: #764ba2;');
+    // Click outside modal to close
+    const modalBackdrop = document.querySelector('.modal-backdrop');
+    if (modalBackdrop) {
+        modalBackdrop.addEventListener('click', closeProfile);
+    }
+}
+
+// ============================================
+// INITIALIZATION
+// ============================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize theme
+    initTheme();
+    
+    // Update counts
+    updateCounts();
+    
+    // Initial render
+    renderStudents();
+    
+    // Setup event listeners
+    setupEventListeners();
+    
+    // Animate overview stats
+    setTimeout(animateOverviewStats, 800);
+    
+    // Setup scroll animations after initial render
+    setTimeout(setupScrollAnimations, 100);
+    
+    // Console message
+    console.log('%c🎓 Master 2 Informatique - Promotion 2025', 
+        'font-size: 20px; font-weight: bold; background: linear-gradient(135deg, #6366f1, #ec4899); -webkit-background-clip: text; color: transparent;');
+    console.log(`%c${students.length} étudiants brillants dans cette promotion!`, 
+        'font-size: 14px; color: #8b5cf6;');
 });
+
+// Add CSS for toast out animation
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes toastOut {
+        from { opacity: 1; transform: translateX(0); }
+        to { opacity: 0; transform: translateX(100%); }
+    }
+`;
+document.head.appendChild(style);
